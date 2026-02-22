@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OrganizeAI: Virtual Staging Test</title>
+    <style>
+        body { font-family: 'Segoe UI', monospace; background: #111; color: #eee; padding: 2rem; max-width: 1200px; margin: 0 auto; }
+        h1, h3 { color: #0f0; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        
+        /* Container for the steps */
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .box { border: 1px solid #333; padding: 20px; background: #222; border-radius: 8px; }
+        
+        /* Logs and inputs */
+        #log { white-space: pre-wrap; color: #aaa; height: 300px; overflow-y: auto; font-size: 0.9em; background: #1a1a1a; padding: 10px; border: 1px solid #333; }
+        .progress-bar { height: 4px; background: #333; width: 100%; margin-top: 10px; }
+        .fill { height: 100%; background: #0f0; width: 0%; transition: width 0.5s; }
+        
+        /* Image Display Areas */
+        .image-container { width: 100%; aspect-ratio: 16/9; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #444; }
+        img { max-width: 100%; max-height: 100%; display: none; }
+        .placeholder { color: #555; }
+        
+        /* Product List */
+        .product-card { display: flex; align-items: center; background: #333; margin-bottom: 10px; padding: 10px; border-radius: 5px; }
+        .product-card img { width: 50px; height: 50px; display: block; margin-right: 15px; border-radius: 4px; }
+        .product-info b { color: #fff; display: block; }
+        .product-info span { color: #0f0; }
+        
+        button { background: #0f0; color: #000; border: none; padding: 10px 20px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 10px; }
+        button:hover { background: #0c0; }
+    </style>
+</head>
+<body>
+
+    <h1>>> ORGANIZE_AI PIPELINE v2.0</h1>
+    
+    <div class="grid">
+        <div class="box">
+            <h3>1. UPLOAD MESSY ROOM</h3>
+            <div class="image-container">
+                <span class="placeholder" id="beforePlaceholder">No Image Selected</span>
+                <img id="beforeImg">
+            </div>
+            <input type="file" id="fileInput" accept="image/*" onchange="previewImage()" style="margin-top: 15px;">
+            <button onclick="startAnalysis()">[ UPLOAD & CLEAN ]</button>
+        </div>
+
+        <div class="box">
+            <h3>2. AI GENERATED RESULT</h3>
+            <div class="image-container">
+                <span class="placeholder" id="afterPlaceholder">Waiting for AI...</span>
+                <img id="afterImg">
+            </div>
+            <div id="status" style="margin-top: 15px; color: #0f0;">READY</div>
+            <div class="progress-bar"><div class="fill" id="fill"></div></div>
+        </div>
+    </div>
+
+    <div class="grid" style="margin-top: 20px;">
+        <div class="box">
+            <h3>SYSTEM LOGS</h3>
+            <div id="log"></div>
+        </div>
+        <div class="box">
+            <h3>SHOPPING LIST</h3>
+            <div id="shoppingList" style="height: 300px; overflow-y: auto;">
+                <div style="color: #555; padding: 20px; text-align: center;">Scan to see products</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Helper: Convert File to Base64
+        const toBase64 = file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result.split(',')[1]); 
+            reader.onerror = error => reject(error);
+        });
+
+        function previewImage() {
+            const file = document.getElementById('fileInput').files[0];
+            const preview = document.getElementById('beforeImg');
+            const placeholder = document.getElementById('beforePlaceholder');
+            if (file) {
+                preview.src = URL.createObjectURL(file);
+                preview.style.display = 'block';
+                placeholder.style.display = 'none';
+            }
+        }
+
+        async function startAnalysis() {
+            const fileInput = document.getElementById('fileInput');
+            const logDiv = document.getElementById('log');
+            const statusDiv = document.getElementById('status');
+            const fillDiv = document.getElementById('fill');
+            const shoppingListDiv = document.getElementById('shoppingList');
+            const afterImg = document.getElementById('afterImg');
+            const afterPlaceholder = document.getElementById('afterPlaceholder');
+
+            if (!fileInput.files.length) {
+                alert("Please select an image first.");
+                return;
+            }
+
+            // Reset UI
+            logDiv.innerHTML = "Initializing...\n";
+            shoppingListDiv.innerHTML = "";
+            afterImg.style.display = 'none';
+            afterPlaceholder.style.display = 'block';
+            afterPlaceholder.innerText = "Analyzing...";
+            fillDiv.style.width = "5%";
+            
+            try {
+                const base64String = await toBase64(fileInput.files[0]);
+                logDiv.innerHTML += "Image encoded. Sending to backend...\n";
+
+                const response = await fetch('http://localhost:8000/api/analyze/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        room_type: "Home Office", 
+                        user_id: "user_test",
+                        image_base64: base64String 
+                    })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const jsonStr = line.replace('data: ', '');
+                            try {
+                                const data = JSON.parse(jsonStr);
+                                
+                                // Update Status Bar
+                                if (data.message) statusDiv.innerText = `>> ${data.message.toUpperCase()}`;
+                                if (data.progress) fillDiv.style.width = data.progress + "%";
+                                
+                                // Append to Log
+                                logDiv.innerHTML += `[${data.stage || 'info'}]: ${data.message || ''}\n`;
+                                logDiv.scrollTop = logDiv.scrollHeight;
+
+                                // HANDLE COMPLETION (The part you asked for)
+                                if (data.status === 'complete' && data.data) {
+                                    const result = data.data;
+
+                                    // 1. Show the Generated Image
+                                    if (result.after_image_url) {
+                                        afterImg.src = result.after_image_url;
+                                        afterImg.onload = () => {
+                                            afterImg.style.display = 'block';
+                                            afterPlaceholder.style.display = 'none';
+                                        };
+                                    }
+
+                                    // 2. Render Shopping List
+                                    if (result.shopping_list && result.shopping_list.length > 0) {
+                                        shoppingListDiv.innerHTML = ""; // Clear placeholder
+                                        result.shopping_list.forEach(item => {
+                                            shoppingListDiv.innerHTML += `
+                                                <div class="product-card">
+                                                    <img src="${item.image || 'https://placehold.co/50'}" alt="prod">
+                                                    <div class="product-info">
+                                                        <b>${item.title.substring(0, 40)}...</b>
+                                                        <span>${item.price}</span>
+                                                        <a href="${item.link}" target="_blank" style="color: #888; font-size: 0.8em;">View on Amazon</a>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        });
+                                    }
+                                }
+
+                            } catch (e) { console.error(e); }
+                        }
+                    }
+                }
+            } catch (err) {
+                logDiv.innerHTML += `\n[CRITICAL FAILURE]: ${err.message}`;
+                statusDiv.innerText = "ERROR";
+                statusDiv.style.color = "red";
+            }
+        }
+    </script>
+</body>
+</html>
