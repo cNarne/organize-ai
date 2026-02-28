@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     GEMINI_API_KEY: str | None = None
     RAINFOREST_API_KEY: str | None = None
-    REPLICATE_API_TOKEN: str  # <-- Add this line
+    REPLICATE_API_TOKEN: str | None = None
     # This reads the .env file
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
 
