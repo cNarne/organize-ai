@@ -53,19 +53,21 @@ async def ai_pipeline_generator(room_type: str, image_base64: str) -> AsyncGener
     yield {"status": "processing", "stage": "ingestion", "message": "Image received. Decoding...", "progress": 5}
     await asyncio.sleep(0.5)
 
-    # Phase 2: Computer Vision
-    yield {"status": "processing", "stage": "vision_analysis", "message": "Analyzing clutter with Gemini Vision...", "progress": 20}
+    # Phase 2: Computer Vision — detects room type and clutter items from the image
+    yield {"status": "processing", "stage": "vision_analysis", "message": "Analyzing room and clutter with Vision...", "progress": 20}
 
     detected_items = []
+    detected_room_type = room_type  # fallback to client-provided value
     try:
         if image_base64:
-            detected_items = await vision_service.analyze_clutter(image_base64, room_type)
+            detected_items, detected_room_type = await vision_service.analyze_clutter(image_base64)
             yield {
                 "status": "processing",
                 "stage": "clutter_detection",
-                "message": f"Identified {len(detected_items)} clutter items.",
+                "message": f"Detected: {detected_room_type}. Found {len(detected_items)} clutter items.",
                 "progress": 40,
-                "data": detected_items
+                "data": detected_items,
+                "room_type": detected_room_type
             }
         else:
             yield {"status": "error", "message": "No image data provided."}
@@ -104,7 +106,7 @@ async def ai_pipeline_generator(room_type: str, image_base64: str) -> AsyncGener
 
     after_image_url = ""
     try:
-        data_uri = await generation_service.render_clean_room(room_type, image_base64, product_names)
+        data_uri = await generation_service.render_clean_room(detected_room_type, image_base64, product_names)
 
         # Strip the data URI prefix and store raw bytes server-side.
         # The SSE stream sends only a small URL — not megabytes of base64.
