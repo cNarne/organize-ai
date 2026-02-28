@@ -128,17 +128,22 @@
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
+                let buffer = '';
 
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
+
+                    // Accumulate chunks — a single SSE event can span multiple TCP packets
+                    buffer += decoder.decode(value, { stream: true });
+
+                    const lines = buffer.split('\n');
+                    // Keep the last (potentially incomplete) line in the buffer
+                    buffer = lines.pop();
+
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
-                            const jsonStr = line.replace('data: ', '');
+                            const jsonStr = line.slice(6);
                             try {
                                 const data = JSON.parse(jsonStr);
                                 
@@ -160,6 +165,10 @@
                                         afterImg.onload = () => {
                                             afterImg.style.display = 'block';
                                             afterPlaceholder.style.display = 'none';
+                                        };
+                                        afterImg.onerror = () => {
+                                            afterPlaceholder.innerText = "Image failed to render.";
+                                            console.error("Image src set but failed to load:", result.after_image_url.slice(0, 80));
                                         };
                                     }
 
