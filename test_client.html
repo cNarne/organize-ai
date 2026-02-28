@@ -119,10 +119,10 @@
                 const response = await fetch('http://localhost:8000/api/analyze/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        room_type: "Home Office", 
+                    body: JSON.stringify({
+                        room_type: "auto",
                         user_id: "user_test",
-                        image_base64: base64String 
+                        image_base64: base64String
                     })
                 });
 
@@ -152,7 +152,9 @@
                                 if (data.progress) fillDiv.style.width = data.progress + "%";
                                 
                                 // Append to Log
-                                logDiv.innerHTML += `[${data.stage || 'info'}]: ${data.message || ''}\n`;
+                                let logLine = `[${data.stage || 'info'}]: ${data.message || ''}`;
+                                if (data.room_type) logLine += ` (detected: ${data.room_type})`;
+                                logDiv.innerHTML += logLine + '\n';
                                 logDiv.scrollTop = logDiv.scrollHeight;
 
                                 // HANDLE COMPLETION (The part you asked for)
