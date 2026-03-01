@@ -99,11 +99,24 @@ async def ai_pipeline_generator(
     yield {"status": "processing", "stage": "product_matching", "message": f"Found {len(shopping_list)} products.", "progress": 75}
 
     # Phase 4: Image Generation
+    # Run generation as a background task and send heartbeats every 8 s so
+    # Railway's proxy doesn't cut the SSE connection during the 60-120 s wait.
     yield {"status": "processing", "stage": "image_generation", "message": "Rendering staged design with your products...", "progress": 80}
 
     after_image_url = ""
     try:
-        data_uri = await generation_service.render_clean_room(detected_room_type, image_base64, product_names)
+        gen_task = asyncio.create_task(
+            generation_service.render_clean_room(detected_room_type, image_base64, product_names)
+        )
+
+        heartbeat_progress = 82
+        while not gen_task.done():
+            await asyncio.sleep(8)
+            if not gen_task.done():
+                heartbeat_progress = min(heartbeat_progress + 1, 93)
+                yield {"status": "processing", "stage": "image_generation", "message": "Still rendering...", "progress": heartbeat_progress}
+
+        data_uri = await gen_task
 
         # Decode base64 → bytes and upload to Supabase Storage.
         # The SSE stream sends back a CDN URL, not megabytes of base64.
