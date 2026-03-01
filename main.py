@@ -2,12 +2,10 @@ import asyncio
 import base64
 import json
 import logging
-import uuid
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 
@@ -15,6 +13,7 @@ from pydantic import BaseModel
 from services.vision import vision_service
 from services.generation import generation_service
 from services.search import search_service
+from services.supabase_service import supabase_service
 
 # --- Configuration & Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -30,10 +29,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory image store: { image_id: bytes }
-# Keeps generated images available for the lifetime of the server process.
-_image_store: dict[str, bytes] = {}
-
 
 # --- Data Transfer Objects (DTOs) ---
 class RoomAnalysisRequest(BaseModel):
@@ -43,13 +38,15 @@ class RoomAnalysisRequest(BaseModel):
 
 
 # --- The AI Pipeline Logic ---
-async def ai_pipeline_generator(room_type: str, image_base64: str) -> AsyncGenerator[dict, None]:
+async def ai_pipeline_generator(
+    room_type: str, image_base64: str, user_id: str
+) -> AsyncGenerator[dict, None]:
     """
-    Orchestrates the AI steps: Vision -> Search -> Generation.
+    Orchestrates the AI steps: Vision -> Search -> Generation -> Persist.
     """
 
     # Phase 1: Ingestion
-    logger.info(f"Starting analysis for {room_type}")
+    logger.info(f"Starting analysis for user={user_id}")
     yield {"status": "processing", "stage": "ingestion", "message": "Image received. Decoding...", "progress": 5}
     await asyncio.sleep(0.5)
 
@@ -108,21 +105,31 @@ async def ai_pipeline_generator(room_type: str, image_base64: str) -> AsyncGener
     try:
         data_uri = await generation_service.render_clean_room(detected_room_type, image_base64, product_names)
 
-        # Strip the data URI prefix and store raw bytes server-side.
-        # The SSE stream sends only a small URL — not megabytes of base64.
+        # Decode base64 → bytes and upload to Supabase Storage.
+        # The SSE stream sends back a CDN URL, not megabytes of base64.
         b64_data = data_uri.split(",", 1)[1]
         image_bytes = base64.b64decode(b64_data)
-        image_id = str(uuid.uuid4())
-        _image_store[image_id] = image_bytes
-        after_image_url = f"http://localhost:8000/api/image/{image_id}"
+        after_image_url = await supabase_service.upload_image(image_bytes)
 
-        logger.info(f"Image stored with id={image_id}")
+        if not after_image_url:
+            # Supabase not configured — fall back to data URI so dev still works
+            after_image_url = data_uri
+
         yield {"status": "processing", "stage": "image_generation", "message": "Design rendered successfully.", "progress": 95}
     except Exception as e:
         logger.error(f"Generation failed: {e}")
         after_image_url = "https://placehold.co/1024x1024?text=Generation+Failed"
 
-    # Phase 5: Completion
+    # Phase 5: Persist scan to database
+    await supabase_service.save_scan(
+        user_id=user_id,
+        room_type=detected_room_type,
+        after_image_url=after_image_url,
+        shopping_list=shopping_list,
+        detected_items=detected_items,
+    )
+
+    # Phase 6: Completion
     yield {
         "status": "complete",
         "progress": 100,
@@ -134,21 +141,12 @@ async def ai_pipeline_generator(room_type: str, image_base64: str) -> AsyncGener
     }
 
 
-# --- Image Retrieval Endpoint ---
-@app.get("/api/image/{image_id}")
-def get_image(image_id: str):
-    image_bytes = _image_store.get(image_id)
-    if not image_bytes:
-        raise HTTPException(status_code=404, detail="Image not found.")
-    return Response(content=image_bytes, media_type="image/png")
-
-
 # --- Analysis Stream Endpoint ---
 @app.post("/api/analyze/stream")
 async def stream_analysis(request: Request, body: RoomAnalysisRequest):
     async def event_generator():
         try:
-            async for step_data in ai_pipeline_generator(body.room_type, body.image_base64):
+            async for step_data in ai_pipeline_generator(body.room_type, body.image_base64, body.user_id):
                 yield {
                     "event": "pipeline_update",
                     "data": json.dumps(step_data)
