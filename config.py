@@ -8,9 +8,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     RAINFOREST_API_KEY: str | None = None
     REPLICATE_API_TOKEN: str | None = None
-    AMAZON_ACCESS_KEY: str | None = None
-    AMAZON_SECRET_KEY: str | None = None
-    AMAZON_ASSOCIATE_TAG: str | None = None
+    SERPAPI_KEY: str | None = None
     SUPABASE_URL: str | None = None
     SUPABASE_SERVICE_KEY: str | None = None
     # This reads the .env file
