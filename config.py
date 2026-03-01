@@ -1,18 +1,16 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
+
+# Loads .env for local dev; silently no-ops on Railway where vars come from os.environ
+load_dotenv()
 
 class Settings(BaseSettings):
     APP_NAME: str = "OrganizeAI"
-    
-    # These must match the variables in your .env file exactly
     OPENAI_API_KEY: str
     GEMINI_API_KEY: str | None = None
     RAINFOREST_API_KEY: str | None = None
     REPLICATE_API_TOKEN: str | None = None
     SUPABASE_URL: str | None = None
     SUPABASE_SERVICE_KEY: str | None = None
-    # This reads the .env file
-    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
 
-# --- THE IMPORTANT PART ---
-# You must instantiate the class into a variable named 'settings'
 settings = Settings()
